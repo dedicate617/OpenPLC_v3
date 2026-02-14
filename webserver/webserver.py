@@ -18,6 +18,7 @@ import ssl
 import threading
 import logging
 import errno
+import json
 
 import flask
 import flask_login
@@ -262,6 +263,54 @@ def delete_persistent_file():
     print("persistent.file removed!")
 
 
+def get_register_blocks(conn, dev_id, reg_type):
+    cur = conn.cursor()
+    cur.execute("SELECT start_address, num_regs FROM Slave_dev_Registers WHERE dev_id = ? AND reg_type = ? ORDER BY reg_order", (int(dev_id), reg_type))
+    rows = cur.fetchall()
+    cur.close()
+    return rows
+
+
+def parse_register_blocks(raw_blocks):
+    if raw_blocks is None:
+        return []
+
+    parsed_blocks = []
+    for line in str(raw_blocks).splitlines():
+        clean = line.strip()
+        if clean == "":
+            continue
+
+        clean = clean.replace(" ", "")
+        separators = [",", ":", "-"]
+        pieces = None
+        for sep in separators:
+            if sep in clean:
+                pieces = clean.split(sep)
+                break
+
+        if (pieces is None) or (len(pieces) != 2):
+            raise ValueError("Invalid block format")
+
+        start_address = int(pieces[0])
+        num_regs = int(pieces[1])
+        if start_address < 0 or num_regs < 0:
+            raise ValueError("Block values must be positive")
+        if num_regs > 0:
+            parsed_blocks.append((start_address, num_regs))
+
+    return parsed_blocks
+
+
+def store_register_blocks(conn, dev_id, reg_type, blocks):
+    cur = conn.cursor()
+    cur.execute("DELETE FROM Slave_dev_Registers WHERE dev_id = ? AND reg_type = ?", (int(dev_id), reg_type))
+    for idx, block in enumerate(blocks):
+        cur.execute("INSERT INTO Slave_dev_Registers (dev_id, reg_type, start_address, num_regs, reg_order) VALUES (?, ?, ?, ?, ?)",
+            (int(dev_id), reg_type, int(block[0]), int(block[1]), idx))
+    cur.close()
+
+
 def generate_mbconfig():
     database = "openplc.db"
     conn = create_connection(database)
@@ -271,76 +320,119 @@ def generate_mbconfig():
             cur.execute("SELECT COUNT(*) FROM Slave_dev")
             row = cur.fetchone()
             num_devices = int(row[0])
-            mbconfig = 'Num_Devices = "' + str(num_devices) + '"'
             cur.close()
-            
+
+            slave_polling = '100'
+            slave_timeout = '1000'
             cur=conn.cursor()
             cur.execute("SELECT * FROM Settings")
             rows = cur.fetchall()
             cur.close()
-                    
             for row in rows:
                 if (row[0] == "Slave_polling"):
                     slave_polling = str(row[1])
                 elif (row[0] == "Slave_timeout"):
                     slave_timeout = str(row[1])
-                    
-            mbconfig += '\nPolling_Period = "' + slave_polling + '"'
-            mbconfig += '\nTimeout = "' + slave_timeout + '"'
-            
+
+            lines = []
+            lines.append('Num_Devices = "' + str(num_devices) + '"')
+            lines.append('Polling_Period = "' + slave_polling + '"')
+            lines.append('Timeout = "' + slave_timeout + '"')
+
             cur = conn.cursor()
             cur.execute("SELECT * FROM Slave_dev")
             rows = cur.fetchall()
             cur.close()
-            conn.close()
-            
+
             device_counter = 0
             for row in rows:
-                mbconfig += """
-# ------------
-#   DEVICE """
-                mbconfig += str(device_counter)
-                mbconfig += """
-# ------------
-"""
-                mbconfig += 'device' + str(device_counter) + '.name = "' + str(row[1]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.slave_id = "' + str(row[3]) + '"\n'
+                lines.append('')
+                lines.append('# ------------')
+                lines.append('#   DEVICE ' + str(device_counter))
+                lines.append('# ------------')
+                lines.append('device' + str(device_counter) + '.name = "' + str(row[1]) + '"')
+                lines.append('device' + str(device_counter) + '.slave_id = "' + str(row[3]) + '"')
+
                 if (str(row[2]) == 'ESP32' or str(row[2]) == 'ESP8266' or str(row[2]) == 'TCP'):
-                    mbconfig += 'device' + str(device_counter) + '.protocol = "TCP"\n'
-                    mbconfig += 'device' + str(device_counter) + '.address = "' + str(row[9]) + '"\n'
+                    lines.append('device' + str(device_counter) + '.protocol = "TCP"')
+                    lines.append('device' + str(device_counter) + '.address = "' + str(row[9]) + '"')
                 else:
-                    mbconfig += 'device' + str(device_counter) + '.protocol = "RTU"\n'
+                    lines.append('device' + str(device_counter) + '.protocol = "RTU"')
                     if (str(row[4]).startswith("COM")):
                         port_name = "/dev/ttyS" + str(int(str(row[4]).split("COM")[1]) - 1)
                     else:
                         port_name = str(row[4])
-                    mbconfig += 'device' + str(device_counter) + '.address = "' + port_name + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.IP_Port = "' + str(row[10]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.RTU_Baud_Rate = "' + str(row[5]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.RTU_Parity = "' + str(row[6]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.RTU_Data_Bits = "' + str(row[7]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.RTU_Stop_Bits = "' + str(row[8]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.RTU_TX_Pause = "' + str(row[21]) + '"\n\n'
-                
-                mbconfig += 'device' + str(device_counter) + '.Discrete_Inputs_Start = "' + str(row[11]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Discrete_Inputs_Size = "' + str(row[12]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Coils_Start = "' + str(row[13]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Coils_Size = "' + str(row[14]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Input_Registers_Start = "' + str(row[15]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Input_Registers_Size = "' + str(row[16]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Holding_Registers_Read_Start = "' + str(row[17]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Holding_Registers_Read_Size = "' + str(row[18]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Holding_Registers_Start = "' + str(row[19]) + '"\n'
-                mbconfig += 'device' + str(device_counter) + '.Holding_Registers_Size = "' + str(row[20]) + '"\n'
+                    lines.append('device' + str(device_counter) + '.address = "' + port_name + '"')
+
+                lines.append('device' + str(device_counter) + '.IP_Port = "' + str(row[10]) + '"')
+                lines.append('device' + str(device_counter) + '.RTU_Baud_Rate = "' + str(row[5]) + '"')
+                lines.append('device' + str(device_counter) + '.RTU_Parity = "' + str(row[6]) + '"')
+                lines.append('device' + str(device_counter) + '.RTU_Data_Bits = "' + str(row[7]) + '"')
+                lines.append('device' + str(device_counter) + '.RTU_Stop_Bits = "' + str(row[8]) + '"')
+                lines.append('device' + str(device_counter) + '.RTU_TX_Pause = "' + str(row[21]) + '"')
+
+                di_blocks = get_register_blocks(conn, row[0], 'DI')
+                coils_blocks = get_register_blocks(conn, row[0], 'COILS')
+                ir_blocks = get_register_blocks(conn, row[0], 'IR')
+                hr_read_blocks = get_register_blocks(conn, row[0], 'HR_READ')
+                hr_write_blocks = get_register_blocks(conn, row[0], 'HR_WRITE')
+
+                if len(di_blocks) == 0:
+                    lines.append('device' + str(device_counter) + '.Discrete_Inputs_Start = "' + str(row[11]) + '"')
+                    lines.append('device' + str(device_counter) + '.Discrete_Inputs_Size = "' + str(row[12]) + '"')
+                else:
+                    lines.append('device' + str(device_counter) + '.Discrete_Inputs_Block_Count = "' + str(len(di_blocks)) + '"')
+                    for idx, block in enumerate(di_blocks):
+                        lines.append('device' + str(device_counter) + '.Discrete_Inputs_Block' + str(idx) + '_Start = "' + str(block[0]) + '"')
+                        lines.append('device' + str(device_counter) + '.Discrete_Inputs_Block' + str(idx) + '_Size = "' + str(block[1]) + '"')
+
+                if len(coils_blocks) == 0:
+                    lines.append('device' + str(device_counter) + '.Coils_Start = "' + str(row[13]) + '"')
+                    lines.append('device' + str(device_counter) + '.Coils_Size = "' + str(row[14]) + '"')
+                else:
+                    lines.append('device' + str(device_counter) + '.Coils_Block_Count = "' + str(len(coils_blocks)) + '"')
+                    for idx, block in enumerate(coils_blocks):
+                        lines.append('device' + str(device_counter) + '.Coils_Block' + str(idx) + '_Start = "' + str(block[0]) + '"')
+                        lines.append('device' + str(device_counter) + '.Coils_Block' + str(idx) + '_Size = "' + str(block[1]) + '"')
+
+                if len(ir_blocks) == 0:
+                    lines.append('device' + str(device_counter) + '.Input_Registers_Start = "' + str(row[15]) + '"')
+                    lines.append('device' + str(device_counter) + '.Input_Registers_Size = "' + str(row[16]) + '"')
+                else:
+                    lines.append('device' + str(device_counter) + '.Input_Registers_Block_Count = "' + str(len(ir_blocks)) + '"')
+                    for idx, block in enumerate(ir_blocks):
+                        lines.append('device' + str(device_counter) + '.Input_Registers_Block' + str(idx) + '_Start = "' + str(block[0]) + '"')
+                        lines.append('device' + str(device_counter) + '.Input_Registers_Block' + str(idx) + '_Size = "' + str(block[1]) + '"')
+
+                if len(hr_read_blocks) == 0:
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Read_Start = "' + str(row[17]) + '"')
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Read_Size = "' + str(row[18]) + '"')
+                else:
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Read_Block_Count = "' + str(len(hr_read_blocks)) + '"')
+                    for idx, block in enumerate(hr_read_blocks):
+                        lines.append('device' + str(device_counter) + '.Holding_Registers_Read_Block' + str(idx) + '_Start = "' + str(block[0]) + '"')
+                        lines.append('device' + str(device_counter) + '.Holding_Registers_Read_Block' + str(idx) + '_Size = "' + str(block[1]) + '"')
+
+                if len(hr_write_blocks) == 0:
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Start = "' + str(row[19]) + '"')
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Size = "' + str(row[20]) + '"')
+                else:
+                    lines.append('device' + str(device_counter) + '.Holding_Registers_Block_Count = "' + str(len(hr_write_blocks)) + '"')
+                    for idx, block in enumerate(hr_write_blocks):
+                        lines.append('device' + str(device_counter) + '.Holding_Registers_Block' + str(idx) + '_Start = "' + str(block[0]) + '"')
+                        lines.append('device' + str(device_counter) + '.Holding_Registers_Block' + str(idx) + '_Size = "' + str(block[1]) + '"')
+
                 device_counter += 1
-                
-            with open('./mbconfig.cfg', 'w+') as f: f.write(mbconfig)
-            
+
+            conn.close()
+            with open('./mbconfig.cfg', 'w+') as f:
+                f.write("\n".join(lines) + "\n")
+
         except Error as e:
             print("error connecting to the database" + str(e))
     else:
         print("Error opening DB")
-                
+
 
     
 def draw_top_div():
@@ -1359,6 +1451,11 @@ def add_modbus_device():
             aor_size = flask.request.form.get('aor_size')
             aow_start = flask.request.form.get('aow_start')
             aow_size = flask.request.form.get('aow_size')
+            di_blocks_raw = flask.request.form.get('di_blocks')
+            coils_blocks_raw = flask.request.form.get('coils_blocks')
+            ir_blocks_raw = flask.request.form.get('ir_blocks')
+            hr_read_blocks_raw = flask.request.form.get('hr_read_blocks')
+            hr_write_blocks_raw = flask.request.form.get('hr_write_blocks')
             
             (devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devpause, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size) \
                 = sanitize_input(devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devpause, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size)
@@ -1369,6 +1466,17 @@ def add_modbus_device():
                 try:
                     cur = conn.cursor()
                     cur.execute("INSERT INTO Slave_dev (dev_name, dev_type, slave_id, com_port, baud_rate, parity, data_bits, stop_bits, ip_address, ip_port, di_start, di_size, coil_start, coil_size, ir_start, ir_size, hr_read_start, hr_read_size, hr_write_start, hr_write_size, pause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size, devpause))
+                    dev_id_db = cur.lastrowid
+                    di_blocks = parse_register_blocks(di_blocks_raw)
+                    coils_blocks = parse_register_blocks(coils_blocks_raw)
+                    ir_blocks = parse_register_blocks(ir_blocks_raw)
+                    hr_read_blocks = parse_register_blocks(hr_read_blocks_raw)
+                    hr_write_blocks = parse_register_blocks(hr_write_blocks_raw)
+                    store_register_blocks(conn, dev_id_db, 'DI', di_blocks)
+                    store_register_blocks(conn, dev_id_db, 'COILS', coils_blocks)
+                    store_register_blocks(conn, dev_id_db, 'IR', ir_blocks)
+                    store_register_blocks(conn, dev_id_db, 'HR_READ', hr_read_blocks)
+                    store_register_blocks(conn, dev_id_db, 'HR_WRITE', hr_write_blocks)
                     conn.commit()
                     cur.close()
                     conn.close()
@@ -1430,6 +1538,16 @@ def modbus_edit_device():
                     cur.execute("SELECT * FROM Slave_dev WHERE dev_id = ?", (int(dev_id),))
                     row = cur.fetchone()
                     cur.close()
+                    di_blocks = get_register_blocks(conn, dev_id, 'DI')
+                    coils_blocks = get_register_blocks(conn, dev_id, 'COILS')
+                    ir_blocks = get_register_blocks(conn, dev_id, 'IR')
+                    hr_read_blocks = get_register_blocks(conn, dev_id, 'HR_READ')
+                    hr_write_blocks = get_register_blocks(conn, dev_id, 'HR_WRITE')
+                    di_blocks_str = "\n".join([str(block[0]) + "," + str(block[1]) for block in di_blocks])
+                    coils_blocks_str = "\n".join([str(block[0]) + "," + str(block[1]) for block in coils_blocks])
+                    ir_blocks_str = "\n".join([str(block[0]) + "," + str(block[1]) for block in ir_blocks])
+                    hr_read_blocks_str = "\n".join([str(block[0]) + "," + str(block[1]) for block in hr_read_blocks])
+                    hr_write_blocks_str = "\n".join([str(block[0]) + "," + str(block[1]) for block in hr_write_blocks])
                     conn.close()
                     return_str += "<input type='hidden' value='" + dev_id + "' id='db_dev_id' name='db_dev_id'/>"
                     return_str += "<label for='dev_name'><b>Device Name</b></label><input type='text' id='dev_name' name='device_name' placeholder='My Device' value='" + str(row[1]) + "'>"
@@ -1500,6 +1618,11 @@ def modbus_edit_device():
                     return_str += 'aorsize.value = "' + str(row[18]) + '";'
                     return_str += 'aowstart.value = "' + str(row[19]) + '";'
                     return_str += 'aowsize.value = "' + str(row[20]) + '";'
+                    return_str += 'document.getElementById("di_blocks").value = ' + json.dumps(di_blocks_str) + ';'
+                    return_str += 'document.getElementById("coils_blocks").value = ' + json.dumps(coils_blocks_str) + ';'
+                    return_str += 'document.getElementById("ir_blocks").value = ' + json.dumps(ir_blocks_str) + ';'
+                    return_str += 'document.getElementById("hr_read_blocks").value = ' + json.dumps(hr_read_blocks_str) + ';'
+                    return_str += 'document.getElementById("hr_write_blocks").value = ' + json.dumps(hr_write_blocks_str) + ';'
                     return_str += 'devpause.value = "' + str(row[21]) + '";}</script></html>'
                     
                 except Error as e:
@@ -1534,6 +1657,11 @@ def modbus_edit_device():
             aor_size = flask.request.form.get('aor_size')
             aow_start = flask.request.form.get('aow_start')
             aow_size = flask.request.form.get('aow_size')
+            di_blocks_raw = flask.request.form.get('di_blocks')
+            coils_blocks_raw = flask.request.form.get('coils_blocks')
+            ir_blocks_raw = flask.request.form.get('ir_blocks')
+            hr_read_blocks_raw = flask.request.form.get('hr_read_blocks')
+            hr_write_blocks_raw = flask.request.form.get('hr_write_blocks')
             
             (devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devpause, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size, devid_db) \
                 = sanitize_input(devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devpause, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size, devid_db)
@@ -1544,6 +1672,16 @@ def modbus_edit_device():
                 try:
                     cur = conn.cursor()
                     cur.execute("UPDATE Slave_dev SET dev_name = ?, dev_type = ?, slave_id = ?, com_port = ?, baud_rate = ?, parity = ?, data_bits = ?, stop_bits = ?, ip_address = ?, ip_port = ?, di_start = ?, di_size = ?, coil_start = ?, coil_size = ?, ir_start = ?, ir_size = ?, hr_read_start = ?, hr_read_size = ?, hr_write_start = ?, hr_write_size = ?, pause = ? WHERE dev_id = ?", (devname, devtype, devid, devcport, devbaud, devparity, devdata, devstop, devip, devport, di_start, di_size, do_start, do_size, ai_start, ai_size, aor_start, aor_size, aow_start, aow_size, devpause, int(devid_db)))
+                    di_blocks = parse_register_blocks(di_blocks_raw)
+                    coils_blocks = parse_register_blocks(coils_blocks_raw)
+                    ir_blocks = parse_register_blocks(ir_blocks_raw)
+                    hr_read_blocks = parse_register_blocks(hr_read_blocks_raw)
+                    hr_write_blocks = parse_register_blocks(hr_write_blocks_raw)
+                    store_register_blocks(conn, devid_db, 'DI', di_blocks)
+                    store_register_blocks(conn, devid_db, 'COILS', coils_blocks)
+                    store_register_blocks(conn, devid_db, 'IR', ir_blocks)
+                    store_register_blocks(conn, devid_db, 'HR_READ', hr_read_blocks)
+                    store_register_blocks(conn, devid_db, 'HR_WRITE', hr_write_blocks)
                     conn.commit()
                     cur.close()
                     conn.close()
@@ -1570,6 +1708,7 @@ def delete_device():
         if (conn != None):
             try:
                 cur = conn.cursor()
+                cur.execute("DELETE FROM Slave_dev_Registers WHERE dev_id = ?", (int(devid_db),))
                 cur.execute("DELETE FROM Slave_dev WHERE dev_id = ?", (int(devid_db),))
                 conn.commit()
                 cur.close()
