@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openplcproject.github.io/schemas/protocol-dsl-v0.1.schema.json",
+  "title": "OpenPLC Free-Port Protocol DSL v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "session_name",
+    "protocol_kind",
+    "transport",
+    "tx",
+    "rx",
+    "bindings"
+  ],
+  "properties": {
+    "version": {
+      "const": "0.1"
+    },
+    "session_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "protocol_kind": {
+      "type": "string",
+      "enum": ["binary", "ascii", "mixed"]
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["serial", "tcp_client", "tcp_server"]
+        },
+        "serial": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["port", "baud", "parity", "data_bits", "stop_bits"],
+          "properties": {
+            "port": { "type": "string", "minLength": 1 },
+            "baud": { "type": "integer", "minimum": 1200, "maximum": 921600 },
+            "parity": { "type": "string", "enum": ["N", "E", "O"] },
+            "data_bits": { "type": "integer", "enum": [7, 8] },
+            "stop_bits": { "type": "integer", "enum": [1, 2] }
+          }
+        },
+        "tcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "port"],
+          "properties": {
+            "host": { "type": "string", "minLength": 1 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "serial" } }, "required": ["type"] },
+          "then": { "required": ["serial"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["tcp_client", "tcp_server"] } },
+            "required": ["type"]
+          },
+          "then": { "required": ["tcp"] }
+        }
+      ]
+    },
+    "tx": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template"],
+      "properties": {
+        "template": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rx": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template"],
+      "properties": {
+        "template": { "type": "string", "minLength": 1 }
+      }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "retry": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "frame_start": { "type": "string", "minLength": 1 },
+        "min_len": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "contains": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "maxItems": 32
+        },
+        "checksum_required": { "type": "boolean" }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "direction"],
+        "properties": {
+          "field": { "type": "string", "minLength": 1 },
+          "direction": {
+            "type": "string",
+            "enum": ["plc_to_proto", "proto_to_plc", "const"]
+          },
+          "source": { "type": "string", "minLength": 1 },
+          "target": { "type": "string", "minLength": 1 },
+          "value": {},
+          "cast": {
+            "type": "string",
+            "enum": [
+              "u8", "s8", "u16be", "u16le", "s16be", "s16le",
+              "u32be", "u32le", "s32be", "s32le", "f32be", "f32le",
+              "bytes", "string"
+            ]
+          },
+          "scale": { "type": "number" },
+          "offset": { "type": "number" },
+          "clamp": {
+            "type": "array",
+            "prefixItems": [{ "type": "number" }, { "type": "number" }],
+            "items": false
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "direction": { "const": "plc_to_proto" } }, "required": ["direction"] },
+            "then": { "required": ["source"] }
+          },
+          {
+            "if": { "properties": { "direction": { "const": "proto_to_plc" } }, "required": ["direction"] },
+            "then": { "required": ["target"] }
+          },
+          {
+            "if": { "properties": { "direction": { "const": "const" } }, "required": ["direction"] },
+            "then": { "required": ["value"] }
+          }
+        ]
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "period_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "max_inflight": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "on_error": {
+          "type": "string",
+          "enum": ["keep_last", "clear_values", "stop_session"]
+        },
+        "backoff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "start_ms", "max_ms"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["fixed", "exponential"] },
+            "start_ms": { "type": "integer", "minimum": 1, "maximum": 60000 },
+            "max_ms": { "type": "integer", "minimum": 1, "maximum": 600000 }
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  }
+}
