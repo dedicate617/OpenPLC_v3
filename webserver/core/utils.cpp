@@ -192,7 +192,7 @@ void disableOutputs()
  * - Current time (stored in %ML1024)
  * - UTC time (stored in %ML1027)
  * - Number of cycles (stored in %ML1025)
- * - Communication error counter (implemented elsewhere)
+ * - Communication error counter and Modbus alarm summaries (implemented elsewhere)
  *
  * @note The function assumes that the `special_functions` array is properly initialized
  *       and that indices 0, 1, and 3 are valid.
@@ -232,8 +232,12 @@ void handleSpecialFunctions()
         *special_functions[1] = cycle_counter;
     }
     
-    // Communication error counter [%ML1026]
-    /* Implemented in modbus_master.cpp */
+    // Communication status from modbus_master.cpp:
+    // [%ML1026] communication error counter
+    // [%ML1030] active disconnected device alarms
+    // [%ML1031] active communication error alarms
+    // [%ML1032] active checksum error alarms
+    // [%ML1033] checksum error counter
 
     // Insert other special functions below
 }
