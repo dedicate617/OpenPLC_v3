@@ -55,6 +55,15 @@ createTableSlave_dev = r"""CREATE TABLE "Slave_dev" (
     PRIMARY KEY("dev_id" AUTOINCREMENT)
 )"""
 
+createTableSlave_dev_Registers = r"""CREATE TABLE "Slave_dev_Registers" (
+    "id"    INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "dev_id"    INTEGER NOT NULL,
+    "reg_type"  TEXT NOT NULL,
+    "start_address" INTEGER NOT NULL,
+    "num_regs"  INTEGER NOT NULL,
+    "reg_order" INTEGER NOT NULL DEFAULT 0
+)"""
+
 createTableUsers = r"""CREATE TABLE "Users" (
     `user_id`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     `name`	TEXT NOT NULL,
@@ -130,6 +139,10 @@ def checkTableSlave_dev(conn):
     checkTableExists(conn, "Slave_dev", createTableSlave_dev)
     return
 
+def checkTableSlave_dev_Registers(conn):
+    checkTableExists(conn, "Slave_dev_Registers", createTableSlave_dev_Registers)
+    return
+
 def create_connection():
     """ create a database connection to a SQLite database """
     if not os.path.exists(builddir):
@@ -142,6 +155,7 @@ def create_connection():
         checkTableUsers(conn)
         checkTableSettings(conn)
         checkTableSlave_dev(conn)
+        checkTableSlave_dev_Registers(conn)
     except Error as e:
         print(sqlite3.version)
         print(e)

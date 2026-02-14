@@ -42,6 +42,7 @@
 #define MB_TCP                1
 #define MB_RTU                2
 #define MAX_MB_IO            400
+#define MAX_MB_BLOCKS         64
 
 using namespace std;
 
@@ -57,6 +58,12 @@ struct MB_address
 {
     uint16_t start_address;
     uint16_t num_regs;
+};
+
+struct MB_address_list
+{
+    uint16_t num_blocks;
+    struct MB_address blocks[MAX_MB_BLOCKS];
 };
 
 struct MB_device
@@ -79,6 +86,11 @@ struct MB_device
     struct MB_address input_registers;
     struct MB_address holding_read_registers;
     struct MB_address holding_registers;
+    struct MB_address_list discrete_input_blocks;
+    struct MB_address_list coil_blocks;
+    struct MB_address_list input_register_blocks;
+    struct MB_address_list holding_read_blocks;
+    struct MB_address_list holding_write_blocks;
 };
 
 struct MB_device *mb_devices;
@@ -147,6 +159,49 @@ void getFunction(char *line, char *parameter)
         i++;
         j++;
         parameter[i] = '\0';
+    }
+}
+
+int getAddressListSize(struct MB_address_list *addr_list)
+{
+    int total = 0;
+    for (int i = 0; i < addr_list->num_blocks; i++)
+    {
+        total += addr_list->blocks[i].num_regs;
+    }
+    return total;
+}
+
+void applyLegacyBlockConfig(struct MB_device *device)
+{
+    if (device->discrete_input_blocks.num_blocks == 0 && device->discrete_inputs.num_regs > 0)
+    {
+        device->discrete_input_blocks.num_blocks = 1;
+        device->discrete_input_blocks.blocks[0] = device->discrete_inputs;
+    }
+
+    if (device->coil_blocks.num_blocks == 0 && device->coils.num_regs > 0)
+    {
+        device->coil_blocks.num_blocks = 1;
+        device->coil_blocks.blocks[0] = device->coils;
+    }
+
+    if (device->input_register_blocks.num_blocks == 0 && device->input_registers.num_regs > 0)
+    {
+        device->input_register_blocks.num_blocks = 1;
+        device->input_register_blocks.blocks[0] = device->input_registers;
+    }
+
+    if (device->holding_read_blocks.num_blocks == 0 && device->holding_read_registers.num_regs > 0)
+    {
+        device->holding_read_blocks.num_blocks = 1;
+        device->holding_read_blocks.blocks[0] = device->holding_read_registers;
+    }
+
+    if (device->holding_write_blocks.num_blocks == 0 && device->holding_registers.num_regs > 0)
+    {
+        device->holding_write_blocks.num_blocks = 1;
+        device->holding_write_blocks.blocks[0] = device->holding_registers;
     }
 }
 
@@ -286,6 +341,33 @@ void parseConfig()
                         getData(line_str, temp_buffer, '"', '"');
                         mb_devices[deviceNumber].input_registers.num_regs = atoi(temp_buffer);
                     }
+                    else if (!strncmp(functionType, "Discrete_Inputs_Block_Count", 27))
+                    {
+                        char temp_buffer[10];
+                        getData(line_str, temp_buffer, '"', '"');
+                        int block_count = atoi(temp_buffer);
+                        if (block_count < 0) block_count = 0;
+                        if (block_count > MAX_MB_BLOCKS) block_count = MAX_MB_BLOCKS;
+                        mb_devices[deviceNumber].discrete_input_blocks.num_blocks = block_count;
+                    }
+                    else if (!strncmp(functionType, "Coils_Block_Count", 17))
+                    {
+                        char temp_buffer[10];
+                        getData(line_str, temp_buffer, '"', '"');
+                        int block_count = atoi(temp_buffer);
+                        if (block_count < 0) block_count = 0;
+                        if (block_count > MAX_MB_BLOCKS) block_count = MAX_MB_BLOCKS;
+                        mb_devices[deviceNumber].coil_blocks.num_blocks = block_count;
+                    }
+                    else if (!strncmp(functionType, "Input_Registers_Block_Count", 27))
+                    {
+                        char temp_buffer[10];
+                        getData(line_str, temp_buffer, '"', '"');
+                        int block_count = atoi(temp_buffer);
+                        if (block_count < 0) block_count = 0;
+                        if (block_count > MAX_MB_BLOCKS) block_count = MAX_MB_BLOCKS;
+                        mb_devices[deviceNumber].input_register_blocks.num_blocks = block_count;
+                    }
                     else if (!strncmp(functionType, "Holding_Registers_Read_Start", 28))
                     {
                         char temp_buffer[10];
@@ -310,6 +392,118 @@ void parseConfig()
                         getData(line_str, temp_buffer, '"', '"');
                         mb_devices[deviceNumber].holding_registers.num_regs = atoi(temp_buffer);
                     }
+                    else if (!strncmp(functionType, "Holding_Registers_Read_Block_Count", 34))
+                    {
+                        char temp_buffer[10];
+                        getData(line_str, temp_buffer, '"', '"');
+                        int block_count = atoi(temp_buffer);
+                        if (block_count < 0) block_count = 0;
+                        if (block_count > MAX_MB_BLOCKS) block_count = MAX_MB_BLOCKS;
+                        mb_devices[deviceNumber].holding_read_blocks.num_blocks = block_count;
+                    }
+                    else if (!strncmp(functionType, "Holding_Registers_Block_Count", 29))
+                    {
+                        char temp_buffer[10];
+                        getData(line_str, temp_buffer, '"', '"');
+                        int block_count = atoi(temp_buffer);
+                        if (block_count < 0) block_count = 0;
+                        if (block_count > MAX_MB_BLOCKS) block_count = MAX_MB_BLOCKS;
+                        mb_devices[deviceNumber].holding_write_blocks.num_blocks = block_count;
+                    }
+                    else
+                    {
+                        int block_idx = -1;
+                        if (sscanf(functionType, "Discrete_Inputs_Block%d_Start", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].discrete_input_blocks.blocks[block_idx].start_address = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Discrete_Inputs_Block%d_Size", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].discrete_input_blocks.blocks[block_idx].num_regs = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Coils_Block%d_Start", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].coil_blocks.blocks[block_idx].start_address = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Coils_Block%d_Size", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].coil_blocks.blocks[block_idx].num_regs = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Input_Registers_Block%d_Start", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].input_register_blocks.blocks[block_idx].start_address = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Input_Registers_Block%d_Size", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].input_register_blocks.blocks[block_idx].num_regs = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Holding_Registers_Read_Block%d_Start", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].holding_read_blocks.blocks[block_idx].start_address = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Holding_Registers_Read_Block%d_Size", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].holding_read_blocks.blocks[block_idx].num_regs = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Holding_Registers_Block%d_Start", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].holding_write_blocks.blocks[block_idx].start_address = atoi(temp_buffer);
+                            }
+                        }
+                        else if (sscanf(functionType, "Holding_Registers_Block%d_Size", &block_idx) == 1)
+                        {
+                            if (block_idx >= 0 && block_idx < MAX_MB_BLOCKS)
+                            {
+                                char temp_buffer[10];
+                                getData(line_str, temp_buffer, '"', '"');
+                                mb_devices[deviceNumber].holding_write_blocks.blocks[block_idx].num_regs = atoi(temp_buffer);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -319,6 +513,11 @@ void parseConfig()
         char log_msg[1000];
         sprintf(log_msg, "Skipping configuration of Slave Devices (mbconfig.cfg file not found)\n");
         openplc_log(log_msg);
+    }
+
+    for (int i = 0; i < num_devices; i++)
+    {
+        applyLegacyBlockConfig(&mb_devices[i]);
     }
 
     //Parser Debug
@@ -401,11 +600,11 @@ void *querySlaveDevices(void *arg)
                     if (special_functions[2] != NULL) *special_functions[2]++;
                     
                     // Because this device is not connected, we skip those input registers
-                    bool_input_index += (mb_devices[i].discrete_inputs.num_regs);
-                    int_input_index += (mb_devices[i].input_registers.num_regs);
-                    int_input_index += (mb_devices[i].holding_read_registers.num_regs);
-                    bool_output_index += (mb_devices[i].coils.num_regs);
-                    int_output_index += (mb_devices[i].holding_registers.num_regs);
+                    bool_input_index += getAddressListSize(&mb_devices[i].discrete_input_blocks);
+                    int_input_index += getAddressListSize(&mb_devices[i].input_register_blocks);
+                    int_input_index += getAddressListSize(&mb_devices[i].holding_read_blocks);
+                    bool_output_index += getAddressListSize(&mb_devices[i].coil_blocks);
+                    int_output_index += getAddressListSize(&mb_devices[i].holding_write_blocks);
                 }
                 else
                 {
@@ -429,177 +628,203 @@ void *querySlaveDevices(void *arg)
                 }
 
                 //Read discrete inputs
-                if (mb_devices[i].discrete_inputs.num_regs != 0)
+                if (mb_devices[i].discrete_input_blocks.num_blocks != 0)
                 {
-                    sleepms(mb_devices[i].rtu_tx_pause);
-                    uint8_t *tempBuff;
-                    tempBuff = (uint8_t *)malloc(mb_devices[i].discrete_inputs.num_regs);
-                    nanosleep(&ts, NULL); 
-                    int return_val = modbus_read_input_bits(mb_devices[i].mb_ctx, mb_devices[i].discrete_inputs.start_address,
-                                                            mb_devices[i].discrete_inputs.num_regs, tempBuff);
-                    if (return_val == -1)
+                    for (int block = 0; block < mb_devices[i].discrete_input_blocks.num_blocks; block++)
                     {
-                        if (mb_devices[i].protocol != MB_RTU)
-                        {
-                            modbus_close(mb_devices[i].mb_ctx);
-                            mb_devices[i].isConnected = false;
-                        }
-                        
-                        sprintf(log_msg, "Modbus Read Discrete Input Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
-                        openplc_log(log_msg);
-                        bool_input_index += (mb_devices[i].discrete_inputs.num_regs);
-                        if (special_functions[2] != NULL) *special_functions[2]++;
-                    }
-                    else
-                    {
-                        pthread_mutex_lock(&ioLock);
-                        for (int j = 0; j < return_val; j++)
-                        {
-                            bool_input_buf[bool_input_index] = tempBuff[j];
-                            bool_input_index++;
-                        }
-                        pthread_mutex_unlock(&ioLock);
-                    }
+                        struct MB_address addr = mb_devices[i].discrete_input_blocks.blocks[block];
+                        if (addr.num_regs == 0) continue;
 
-                    free(tempBuff);
+                        sleepms(mb_devices[i].rtu_tx_pause);
+                        uint8_t *tempBuff;
+                        tempBuff = (uint8_t *)malloc(addr.num_regs);
+                        nanosleep(&ts, NULL);
+                        int return_val = modbus_read_input_bits(mb_devices[i].mb_ctx, addr.start_address, addr.num_regs, tempBuff);
+                        if (return_val == -1)
+                        {
+                            if (mb_devices[i].protocol != MB_RTU)
+                            {
+                                modbus_close(mb_devices[i].mb_ctx);
+                                mb_devices[i].isConnected = false;
+                            }
+
+                            sprintf(log_msg, "Modbus Read Discrete Input Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
+                            openplc_log(log_msg);
+                            bool_input_index += addr.num_regs;
+                            if (special_functions[2] != NULL) *special_functions[2]++;
+                        }
+                        else
+                        {
+                            pthread_mutex_lock(&ioLock);
+                            for (int j = 0; j < return_val; j++)
+                            {
+                                bool_input_buf[bool_input_index] = tempBuff[j];
+                                bool_input_index++;
+                            }
+                            pthread_mutex_unlock(&ioLock);
+                        }
+
+                        free(tempBuff);
+                    }
                 }
 
                 //Write coils
-                if (mb_devices[i].coils.num_regs != 0)
+                if (mb_devices[i].coil_blocks.num_blocks != 0)
                 {
-                    sleepms(mb_devices[i].rtu_tx_pause);
-                    uint8_t *tempBuff;
-                    tempBuff = (uint8_t *)malloc(mb_devices[i].coils.num_regs);
-
-                    pthread_mutex_lock(&ioLock);
-                    for (int j = 0; j < mb_devices[i].coils.num_regs; j++)
+                    for (int block = 0; block < mb_devices[i].coil_blocks.num_blocks; block++)
                     {
-                        tempBuff[j] = bool_output_buf[bool_output_index];
-                        bool_output_index++;
-                    }
-                    pthread_mutex_unlock(&ioLock);
+                        struct MB_address addr = mb_devices[i].coil_blocks.blocks[block];
+                        if (addr.num_regs == 0) continue;
 
-                    nanosleep(&ts, NULL); 
-                    int return_val = modbus_write_bits(mb_devices[i].mb_ctx, mb_devices[i].coils.start_address, mb_devices[i].coils.num_regs, tempBuff);
-                    if (return_val == -1)
-                    {
-                        if (mb_devices[i].protocol != MB_RTU)
+                        sleepms(mb_devices[i].rtu_tx_pause);
+                        uint8_t *tempBuff;
+                        tempBuff = (uint8_t *)malloc(addr.num_regs);
+
+                        pthread_mutex_lock(&ioLock);
+                        for (int j = 0; j < addr.num_regs; j++)
                         {
-                            modbus_close(mb_devices[i].mb_ctx);
-                            mb_devices[i].isConnected = false;
+                            tempBuff[j] = bool_output_buf[bool_output_index];
+                            bool_output_index++;
+                        }
+                        pthread_mutex_unlock(&ioLock);
+
+                        nanosleep(&ts, NULL);
+                        int return_val = modbus_write_bits(mb_devices[i].mb_ctx, addr.start_address, addr.num_regs, tempBuff);
+                        if (return_val == -1)
+                        {
+                            if (mb_devices[i].protocol != MB_RTU)
+                            {
+                                modbus_close(mb_devices[i].mb_ctx);
+                                mb_devices[i].isConnected = false;
+                            }
+
+                            sprintf(log_msg, "Modbus Write Coils failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
+                            openplc_log(log_msg);
+                            if (special_functions[2] != NULL) *special_functions[2]++;
                         }
 
-                        sprintf(log_msg, "Modbus Write Coils failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
-                        openplc_log(log_msg);
-                        if (special_functions[2] != NULL) *special_functions[2]++;
+                        free(tempBuff);
                     }
-                    
-                    free(tempBuff);
                 }
 
                 //Read input registers
-                if (mb_devices[i].input_registers.num_regs != 0)
+                if (mb_devices[i].input_register_blocks.num_blocks != 0)
                 {
-                    sleepms(mb_devices[i].rtu_tx_pause);
-                    uint16_t *tempBuff;
-                    tempBuff = (uint16_t *)malloc(2*mb_devices[i].input_registers.num_regs);
-                    nanosleep(&ts, NULL); 
-                    int return_val = modbus_read_input_registers(    mb_devices[i].mb_ctx, mb_devices[i].input_registers.start_address,
-                                                                    mb_devices[i].input_registers.num_regs, tempBuff);
-                    if (return_val == -1)
+                    for (int block = 0; block < mb_devices[i].input_register_blocks.num_blocks; block++)
                     {
-                        if (mb_devices[i].protocol != MB_RTU)
-                        {
-                            modbus_close(mb_devices[i].mb_ctx);
-                            mb_devices[i].isConnected = false;
-                        }
-                        
-                        sprintf(log_msg, "Modbus Read Input Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
-                        openplc_log(log_msg);
-                        int_input_index += (mb_devices[i].input_registers.num_regs);
-                        if (special_functions[2] != NULL) *special_functions[2]++;
-                    }
-                    else
-                    {
-                        pthread_mutex_lock(&ioLock);
-                        for (int j = 0; j < return_val; j++)
-                        {
-                            int_input_buf[int_input_index] = tempBuff[j];
-                            int_input_index++;
-                        }
-                        pthread_mutex_unlock(&ioLock);
-                    }
+                        struct MB_address addr = mb_devices[i].input_register_blocks.blocks[block];
+                        if (addr.num_regs == 0) continue;
 
-                    free(tempBuff);
+                        sleepms(mb_devices[i].rtu_tx_pause);
+                        uint16_t *tempBuff;
+                        tempBuff = (uint16_t *)malloc(2*addr.num_regs);
+                        nanosleep(&ts, NULL);
+                        int return_val = modbus_read_input_registers(mb_devices[i].mb_ctx, addr.start_address, addr.num_regs, tempBuff);
+                        if (return_val == -1)
+                        {
+                            if (mb_devices[i].protocol != MB_RTU)
+                            {
+                                modbus_close(mb_devices[i].mb_ctx);
+                                mb_devices[i].isConnected = false;
+                            }
+
+                            sprintf(log_msg, "Modbus Read Input Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
+                            openplc_log(log_msg);
+                            int_input_index += addr.num_regs;
+                            if (special_functions[2] != NULL) *special_functions[2]++;
+                        }
+                        else
+                        {
+                            pthread_mutex_lock(&ioLock);
+                            for (int j = 0; j < return_val; j++)
+                            {
+                                int_input_buf[int_input_index] = tempBuff[j];
+                                int_input_index++;
+                            }
+                            pthread_mutex_unlock(&ioLock);
+                        }
+
+                        free(tempBuff);
+                    }
                 }
 
                 //Read holding registers
-                if (mb_devices[i].holding_read_registers.num_regs != 0)
+                if (mb_devices[i].holding_read_blocks.num_blocks != 0)
                 {
-                    sleepms(mb_devices[i].rtu_tx_pause);
-                    uint16_t *tempBuff;
-                    tempBuff = (uint16_t *)malloc(2*mb_devices[i].holding_read_registers.num_regs);
-                    nanosleep(&ts, NULL); 
-                    int return_val = modbus_read_registers(mb_devices[i].mb_ctx, mb_devices[i].holding_read_registers.start_address,
-                                                           mb_devices[i].holding_read_registers.num_regs, tempBuff);
-                    if (return_val == -1)
+                    for (int block = 0; block < mb_devices[i].holding_read_blocks.num_blocks; block++)
                     {
-                        if (mb_devices[i].protocol != MB_RTU)
-                        {
-                            modbus_close(mb_devices[i].mb_ctx);
-                            mb_devices[i].isConnected = false;
-                        }
-                        sprintf(log_msg, "Modbus Read Holding Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
-                        openplc_log(log_msg);
-                        int_input_index += (mb_devices[i].holding_read_registers.num_regs);
-                        if (special_functions[2] != NULL) *special_functions[2]++;
-                    }
-                    else
-                    {
-                        pthread_mutex_lock(&ioLock);
-                        for (int j = 0; j < return_val; j++)
-                        {
-                            int_input_buf[int_input_index] = tempBuff[j];
-                            int_input_index++;
-                        }
-                        pthread_mutex_unlock(&ioLock);
-                    }
+                        struct MB_address addr = mb_devices[i].holding_read_blocks.blocks[block];
+                        if (addr.num_regs == 0) continue;
 
-                    free(tempBuff);
+                        sleepms(mb_devices[i].rtu_tx_pause);
+                        uint16_t *tempBuff;
+                        tempBuff = (uint16_t *)malloc(2*addr.num_regs);
+                        nanosleep(&ts, NULL);
+                        int return_val = modbus_read_registers(mb_devices[i].mb_ctx, addr.start_address, addr.num_regs, tempBuff);
+                        if (return_val == -1)
+                        {
+                            if (mb_devices[i].protocol != MB_RTU)
+                            {
+                                modbus_close(mb_devices[i].mb_ctx);
+                                mb_devices[i].isConnected = false;
+                            }
+                            sprintf(log_msg, "Modbus Read Holding Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
+                            openplc_log(log_msg);
+                            int_input_index += addr.num_regs;
+                            if (special_functions[2] != NULL) *special_functions[2]++;
+                        }
+                        else
+                        {
+                            pthread_mutex_lock(&ioLock);
+                            for (int j = 0; j < return_val; j++)
+                            {
+                                int_input_buf[int_input_index] = tempBuff[j];
+                                int_input_index++;
+                            }
+                            pthread_mutex_unlock(&ioLock);
+                        }
+
+                        free(tempBuff);
+                    }
                 }
 
                 //Write holding registers
-                if (mb_devices[i].holding_registers.num_regs != 0)
+                if (mb_devices[i].holding_write_blocks.num_blocks != 0)
                 {
-                    sleepms(mb_devices[i].rtu_tx_pause);
-                    uint16_t *tempBuff;
-                    tempBuff = (uint16_t *)malloc(2*mb_devices[i].holding_registers.num_regs);
-
-                    pthread_mutex_lock(&ioLock);
-                    for (int j = 0; j < mb_devices[i].holding_registers.num_regs; j++)
+                    for (int block = 0; block < mb_devices[i].holding_write_blocks.num_blocks; block++)
                     {
-                        tempBuff[j] = int_output_buf[int_output_index];
-                        int_output_index++;
-                    }
-                    pthread_mutex_unlock(&ioLock);
+                        struct MB_address addr = mb_devices[i].holding_write_blocks.blocks[block];
+                        if (addr.num_regs == 0) continue;
 
-                    nanosleep(&ts, NULL); 
-                    int return_val = modbus_write_registers(mb_devices[i].mb_ctx, mb_devices[i].holding_registers.start_address,
-                                                            mb_devices[i].holding_registers.num_regs, tempBuff);
-                    if (return_val == -1)
-                    {
-                        if (mb_devices[i].protocol != MB_RTU)
+                        sleepms(mb_devices[i].rtu_tx_pause);
+                        uint16_t *tempBuff;
+                        tempBuff = (uint16_t *)malloc(2*addr.num_regs);
+
+                        pthread_mutex_lock(&ioLock);
+                        for (int j = 0; j < addr.num_regs; j++)
                         {
-                            modbus_close(mb_devices[i].mb_ctx);
-                            mb_devices[i].isConnected = false;
+                            tempBuff[j] = int_output_buf[int_output_index];
+                            int_output_index++;
                         }
-                        
-                        sprintf(log_msg, "Modbus Write Holding Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
-                        openplc_log(log_msg);
-                        if (special_functions[2] != NULL) *special_functions[2]++;
+                        pthread_mutex_unlock(&ioLock);
+
+                        nanosleep(&ts, NULL);
+                        int return_val = modbus_write_registers(mb_devices[i].mb_ctx, addr.start_address, addr.num_regs, tempBuff);
+                        if (return_val == -1)
+                        {
+                            if (mb_devices[i].protocol != MB_RTU)
+                            {
+                                modbus_close(mb_devices[i].mb_ctx);
+                                mb_devices[i].isConnected = false;
+                            }
+
+                            sprintf(log_msg, "Modbus Write Holding Registers failed on MB device %s: %s\n", mb_devices[i].dev_name, modbus_strerror(errno));
+                            openplc_log(log_msg);
+                            if (special_functions[2] != NULL) *special_functions[2]++;
+                        }
+
+                        free(tempBuff);
                     }
-                    
-                    free(tempBuff);
                 }
             }
         }
