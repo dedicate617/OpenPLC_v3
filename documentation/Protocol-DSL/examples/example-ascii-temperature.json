@@ -1,0 +1,40 @@
+{
+  "version": "0.1",
+  "session_name": "ascii_temp_query",
+  "protocol_kind": "ascii",
+  "transport": {
+    "type": "tcp_client",
+    "tcp": {
+      "host": "192.168.1.50",
+      "port": 5001
+    }
+  },
+  "tx": {
+    "template": "\"$RD,\" {CH:u16,fmt=%d,width=2,pad=zero} CRLF"
+  },
+  "rx": {
+    "template": "\"$RD,\" {CH:u16,fmt=%d} \",\" {TEMP:f32le,fmt=%.2f} \",\" {LRC_ASCII} CRLF"
+  },
+  "match": {
+    "timeout_ms": 500,
+    "retry": 1,
+    "frame_start": "$RD,",
+    "min_len": 10,
+    "contains": [","],
+    "checksum_required": true
+  },
+  "bindings": [
+    { "field": "CH", "direction": "const", "value": 1, "cast": "u16be" },
+    { "field": "TEMP", "direction": "proto_to_plc", "target": "%IW120", "cast": "f32le" }
+  ],
+  "runtime": {
+    "period_ms": 1000,
+    "max_inflight": 1,
+    "on_error": "keep_last",
+    "backoff": {
+      "mode": "fixed",
+      "start_ms": 1000,
+      "max_ms": 1000
+    }
+  }
+}
