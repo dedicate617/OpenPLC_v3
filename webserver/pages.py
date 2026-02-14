@@ -1563,6 +1563,10 @@ add_slave_devices_tail = """
                         <input type='text' style='width: 20%' id='aow_start' name='aow_start' placeholder='0'>
                         <label for='aow_size' style='padding-left:20px'><b>Size:</b></label>
                         <input type='text' style='width: 20%' id='aow_size' name='aow_size' placeholder='8'>
+                        <p style='font-size:14px; margin-top:20px'><b>Holding Registers - Read Blocks (one block per line: start,size)</b></p>
+                        <textarea id='hr_read_blocks' name='hr_read_blocks' rows='4' style='width: 90%' placeholder='0,10&#10;100,5'></textarea>
+                        <p style='font-size:14px; margin-top:10px'><b>Holding Registers - Write Blocks (one block per line: start,size)</b></p>
+                        <textarea id='hr_write_blocks' name='hr_write_blocks' rows='4' style='width: 90%' placeholder='0,10&#10;100,5'></textarea>
                     </div>
                     <br>
                     <center><input type="submit" class="button" style="font-weight:bold; width: 310px; height: 53px; margin: 0px 20px 0px 20px;" value='Save device'></center>
@@ -1912,6 +1916,10 @@ edit_slave_devices_tail = """
                         <input type='text' style='width: 20%' id='aow_start' name='aow_start' placeholder='0'>
                         <label for='aow_size' style='padding-left:20px'><b>Size:</b></label>
                         <input type='text' style='width: 20%' id='aow_size' name='aow_size' placeholder='8'>
+                        <p style='font-size:14px; margin-top:20px'><b>Holding Registers - Read Blocks (one block per line: start,size)</b></p>
+                        <textarea id='hr_read_blocks' name='hr_read_blocks' rows='4' style='width: 90%' placeholder='0,10&#10;100,5'></textarea>
+                        <p style='font-size:14px; margin-top:10px'><b>Holding Registers - Write Blocks (one block per line: start,size)</b></p>
+                        <textarea id='hr_write_blocks' name='hr_write_blocks' rows='4' style='width: 90%' placeholder='0,10&#10;100,5'></textarea>
                     </div>
                     <br>
                     <center><input type="submit" class="button" style="font-weight:bold; width: 310px; height: 53px; margin: 0px 20px 0px 20px;" value='Save device'><a href='delete-device?dev_id="""
