@@ -1,0 +1,44 @@
+{
+  "version": "0.1",
+  "session_name": "mixed_header_payload",
+  "protocol_kind": "mixed",
+  "transport": {
+    "type": "tcp_client",
+    "tcp": {
+      "host": "10.10.10.20",
+      "port": 4001
+    }
+  },
+  "tx": {
+    "template": "\"@CMD,\" {DEV:u8,fmt=%02X} \",\" {LEN:u16be,fmt=%d} \",\" {DATA:bytes(LEN)} {XOR8} CRLF"
+  },
+  "rx": {
+    "template": "\"@ACK,\" {DEV:u8,fmt=%02X} \",\" {STATUS:u8,fmt=%02X} \",\" {DATA:bytes(LEN)} {XOR8} CRLF"
+  },
+  "match": {
+    "timeout_ms": 300,
+    "retry": 2,
+    "frame_start": "@ACK,",
+    "min_len": 8,
+    "checksum_required": true
+  },
+  "bindings": [
+    { "field": "DEV", "direction": "const", "value": 1, "cast": "u8" },
+    { "field": "LEN", "direction": "const", "value": 4, "cast": "u16be" },
+    { "field": "DATA[0]", "direction": "plc_to_proto", "source": "%QW200", "cast": "u8" },
+    { "field": "DATA[1]", "direction": "plc_to_proto", "source": "%QW201", "cast": "u8" },
+    { "field": "DATA[2]", "direction": "plc_to_proto", "source": "%QW202", "cast": "u8" },
+    { "field": "DATA[3]", "direction": "plc_to_proto", "source": "%QW203", "cast": "u8" },
+    { "field": "STATUS", "direction": "proto_to_plc", "target": "%IW210", "cast": "u8" }
+  ],
+  "runtime": {
+    "period_ms": 200,
+    "max_inflight": 1,
+    "on_error": "keep_last",
+    "backoff": {
+      "mode": "exponential",
+      "start_ms": 200,
+      "max_ms": 3000
+    }
+  }
+}
