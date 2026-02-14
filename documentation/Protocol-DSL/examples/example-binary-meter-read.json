@@ -1,0 +1,45 @@
+{
+  "version": "0.1",
+  "session_name": "meter_binary_read",
+  "protocol_kind": "binary",
+  "transport": {
+    "type": "serial",
+    "serial": {
+      "port": "/dev/ttyUSB0",
+      "baud": 9600,
+      "parity": "N",
+      "data_bits": 8,
+      "stop_bits": 1
+    }
+  },
+  "tx": {
+    "template": "68 {ADDR:u8} 11 04 {REG:u16be} {COUNT:u16be} {CRC16_MODBUS}"
+  },
+  "rx": {
+    "template": "68 {ADDR:u8} 91 {DATA:bytes(COUNT*2)} {CRC16_MODBUS}"
+  },
+  "match": {
+    "timeout_ms": 250,
+    "retry": 2,
+    "frame_start": "68",
+    "min_len": 8,
+    "checksum_required": true
+  },
+  "bindings": [
+    { "field": "ADDR", "direction": "plc_to_proto", "source": "%QW100", "cast": "u8" },
+    { "field": "REG", "direction": "const", "value": 0, "cast": "u16be" },
+    { "field": "COUNT", "direction": "const", "value": 2, "cast": "u16be" },
+    { "field": "DATA[0]", "direction": "proto_to_plc", "target": "%IW100", "cast": "u16be", "scale": 0.1 },
+    { "field": "DATA[1]", "direction": "proto_to_plc", "target": "%IW101", "cast": "u16be", "scale": 0.1 }
+  ],
+  "runtime": {
+    "period_ms": 100,
+    "max_inflight": 1,
+    "on_error": "keep_last",
+    "backoff": {
+      "mode": "exponential",
+      "start_ms": 500,
+      "max_ms": 5000
+    }
+  }
+}
